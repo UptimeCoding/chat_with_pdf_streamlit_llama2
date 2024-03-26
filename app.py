@@ -1,75 +1,114 @@
 # Import necessary libraries.
-import streamlit as st
 import subprocess
+import sys
 
-# Install langchain package.
-subprocess.run(["pip", "install", "langchain"])
+def install_package(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-from langchain.vectorstores import Chroma
-from langchain.llms import LlamaCpp
-from langchain.callbacks.manager import CallbackManager
-from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.chains.question_answering import load_qa_chain
+# List of packages to install
+packages = [
+    "streamlit",
+    "Pillow",
+    "torch",
+    "diffusers"
+]
 
-# Set web page title and icon.
-st.set_page_config(
-    page_title="Chat with PDF",
-    page_icon=":robot:"
-)
+# Install each package
+for package in packages:
+    install_package(package)
 
-# Set web page title and markdown.
-st.title('💬 Chat with PDF 📄 (Powered by Llama 2 🦙🦙)')
-st.markdown(
-    """
-    This is the demonstration of a chatbot with PDF with Llama 2, Chroma, and Streamlit.
-    I read the book Machine Learning Yearning by Andrew Ng. Please ask me any questions about this book.
-    """
-)
+# Now you can import the required modules
+import streamlit as st
+from PIL import Image
+import torch
+from diffusers import StableDiffusionPipeline
 
-# Define a function to get user input.
-def get_input_text():
-    input_text = st.text_input("Ask a question about your PDF:")
-    return input_text
 
-# Define to variables to use "sentence-transformers/all-MiniLM-L6-v2" embedding model from HuggingFace.
-embeddings=HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+DEFAULT_PROMPT = "the fly sat on the jam, that's the whole poem"
+OUTPUT_IMG = "output"
 
-# Define the Chroma vector store and function to generate embeddings.
-db = Chroma(persist_directory="./chroma_db/", embedding_function=embeddings)
 
-# Get user input.
-user_input = get_input_text()
+@st.cache(allow_output_mutation=True, max_entries=1)
+def get_pipeline():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5").to(device)
 
-# Initialize the Azure OpenAI ChatGPT model.
-callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
 
-# Define the path of the Llamaccp model.
-model_path = "/Users/easonlai/.cache/huggingface/hub/models--TheBloke--Llama-2-13B-chat-GGUF/snapshots/245bc5104d85dcc9a11a0e0a9ae6de38dfae536f/llama-2-13b-chat.Q4_K_M.gguf"
+def set_image(key: str, img: Image.Image):
+    st.session_state[key] = img
 
-n_gpu_layers = 40  # Change this value based on your model and your GPU VRAM pool.
-n_batch = 512  # Should be between 1 and n_ctx, consider the amount of VRAM in your GPU.
 
-# Initialize the llamaCpp model.
-llm = LlamaCpp(
-    model_path=model_path,
-    max_tokens=256,
-    n_gpu_layers=n_gpu_layers,
-    n_batch=n_batch,
-    callback_manager=callback_manager,
-    n_ctx=2048,
-    verbose=False,
-)
+def get_image(key: str) -> Image.Image:
+    if key in st.session_state:
+        return st.session_state[key]
+    return None
 
-# Define the function to get the response.
-if user_input:
-    # Perform similarity search for the user input.
-    docs = db.similarity_search(user_input)
 
-    # Load the question answering chain.
-    chain = load_qa_chain(llm, chain_type="stuff")
+def generate(prompt, default_height, default_width, num_inference_steps, guidance_scale, number_of_pictures):
+    pipe = get_pipeline()
+    image = pipe(prompt=[prompt] * number_of_pictures, height=default_height, width=default_width,
+                 guidance_scale=guidance_scale,
+                 num_inference_steps=num_inference_steps).images
+    set_image(OUTPUT_IMG, image.copy())
+    return image
 
-    # Get the response from llamaCpp model.
-    response = chain.run(input_documents=docs, question=user_input)
 
-    # Display the response.
-    st.write(response)
+def prompt_and_generate_button(prefix, default_height, default_width, num_inference_steps, guidance_scale,
+                               number_of_pictures):
+    prompt = st.text_area(
+        "Prompt",
+        value=DEFAULT_PROMPT,
+        key=f"{prefix}-prompt",
+    )
+    if st.button("Generate image", key=f"{prefix}-btn"):
+        with st.spinner("Generating your image, please wait..."):
+            image = generate(prompt, default_height, default_width, num_inference_steps, guidance_scale,
+                             number_of_pictures)
+        st.image(image)
+
+
+def txt2img_tab(default_height, default_width, num_inference_steps, guidance_scale, number_of_pictures):
+    prompt_and_generate_button("txt2img", default_height, default_width, num_inference_steps, guidance_scale,
+                               number_of_pictures)
+
+
+def settings_tab():
+    default_height = st.slider("Final height", value=512, min_value=16, max_value=1024,
+                               help="After getting an image there will be resizing for specified height.")
+    default_width = st.slider("Final width", value=512, min_value=16, max_value=1024,
+                              help="After getting an image there will be resizing for specified width.")
+    num_inference_steps = st.slider("Num inference steps", value=50, min_value=1, max_value=100,
+                                    help="More steps usually lead to a higher quality of image and slower inference.")
+    guidance_scale = st.slider("Guidance scale", value=7, min_value=0, max_value=30,
+                               help="A higher hint scale encourages images that are closely related to the text hint, "
+                                    "usually at the expense of lower image quality.")
+    number_of_pictures = st.slider("Num of pictures", value=1, min_value=1, max_value=10,
+                                   help="Number of images to be generated")
+    return default_height, default_width, num_inference_steps, guidance_scale, number_of_pictures
+
+
+def main():
+    st.set_page_config(layout="wide")
+    st.title("Stable Diffusion + Streamlit SPbU 3 Semester homework by [lastdesire](https://github.com/lastdesire)")
+    tab, settings = st.tabs(
+        ["Text to Image", "Settings"]
+    )
+    with settings:
+        default_height, default_width, num_inference_steps, guidance_scale, number_of_pictures = settings_tab()
+
+    with tab:
+        txt2img_tab(default_height, default_width, num_inference_steps, guidance_scale, number_of_pictures)
+
+    with st.sidebar:
+        st.header("Latest image:")
+        output_image = get_image(OUTPUT_IMG)
+        if output_image:
+            st.image(output_image)
+        else:
+            st.markdown("No output created yet.")
+    st.write("NOTE: if you see a completely black image after generation, try increasing the \"Num inference steps\" "
+             "in the settings (NSFW content blocking)")
+
+
+if __name__ == "__main__":
+    main()
