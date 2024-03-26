@@ -1,6 +1,9 @@
 # Import necessary libraries.
 import streamlit as st
+import subprocess
 
+# Install langchain package.
+subprocess.run(["pip", "install", "langchain"])
 
 from langchain.vectorstores import Chroma
 from langchain.llms import LlamaCpp
