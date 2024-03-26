@@ -1,7 +1,8 @@
 # Import necessary libraries.
 import streamlit as st
 
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.embeddings.hugging_face import HuggingFaceEmbeddings
+
 from langchain.vectorstores import Chroma
 from langchain.llms import LlamaCpp
 from langchain.callbacks.manager import CallbackManager
